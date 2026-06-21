@@ -27,6 +27,11 @@ def get_base64_of_bin_file(bin_file):
         return ""
 
 bg_img_base64 = get_base64_of_bin_file("car_background.png")
+if bg_img_base64:
+    bg_style_url = f"data:image/png;base64,{bg_img_base64}"
+else:
+    # High-quality premium bright car background fallback
+    bg_style_url = "https://images.unsplash.com/photo-1494976388531-d1058494cdd8?auto=format&fit=crop&q=80&w=1920"
 
 # --- CUSTOM CSS FOR PREMIUM LOOK & FEEL ---
 st.markdown(f"""
@@ -41,7 +46,7 @@ st.markdown(f"""
     
     /* Bright Car-Themed Background styling */
     [data-testid="stAppViewContainer"] {{
-        background-image: url("data:image/png;base64,{bg_img_base64}");
+        background-image: url("{bg_style_url}");
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
