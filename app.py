@@ -31,7 +31,7 @@ if bg_img_base64:
     bg_style_url = f"data:image/png;base64,{bg_img_base64}"
 else:
     # High-quality premium bright car background fallback
-    bg_style_url = "https://images.unsplash.com/photo-1494976388531-d1058494cdd8?auto=format&fit=crop&q=80&w=1920"
+    bg_style_url = "https://share.google/Zv8y3bKtPkE8TvmSB"
 
 # --- CUSTOM CSS FOR PREMIUM LOOK & FEEL ---
 st.markdown(f"""
