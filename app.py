@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import os
+import base64
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -16,93 +17,159 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- LOAD BACKGROUND IMAGE ---
+def get_base64_of_bin_file(bin_file):
+    try:
+        with open(bin_file, 'rb') as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except Exception:
+        return ""
+
+bg_img_base64 = get_base64_of_bin_file("car_background.png")
+
 # --- CUSTOM CSS FOR PREMIUM LOOK & FEEL ---
-st.markdown("""
+st.markdown(f"""
 <style>
     /* Google Fonts Import */
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
     
-    /* Global Typography */
-    html, body, [class*="css"] {
+    /* Global Typography & Background */
+    html, body, [class*="css"] {{
         font-family: 'Outfit', sans-serif;
-    }
+    }}
+    
+    /* Bright Car-Themed Background styling */
+    [data-testid="stAppViewContainer"] {{
+        background-image: url("data:image/png;base64,{bg_img_base64}");
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+    }}
+    
+    [data-testid="stHeader"] {{
+        background-color: rgba(255, 255, 255, 0.1) !important;
+        backdrop-filter: blur(8px);
+    }}
+    
+    [data-testid="stAppViewBlockContainer"] {{
+        background-color: rgba(255, 255, 255, 0.55);
+        padding: 3rem !important;
+        border-radius: 24px;
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.6);
+        backdrop-filter: blur(8px);
+        margin-top: 1rem;
+    }}
+    
+    [data-testid="stSidebar"] {{
+        background-color: rgba(255, 255, 255, 0.85) !important;
+        backdrop-filter: blur(10px);
+        border-right: 1px solid rgba(0, 0, 0, 0.05);
+    }}
+    
+    /* Sidebar Headers and Labels */
+    [data-testid="stSidebar"] h1, 
+    [data-testid="stSidebar"] h2, 
+    [data-testid="stSidebar"] h3, 
+    [data-testid="stSidebar"] label, 
+    [data-testid="stSidebar"] p,
+    [data-testid="stSidebar"] span {{
+        color: #1e293b !important;
+        font-weight: 600 !important;
+    }}
+    
+    /* Force high-contrast text color on main content for readability */
+    .stMarkdown, p, span, label, li, h1, h2, h3, h4, h5, h6 {{
+        color: #2c3e50 !important;
+    }}
     
     /* Gradient Title */
-    .gradient-text {
+    .gradient-text {{
         background: linear-gradient(135deg, #FF4B4B, #FF8F00);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         font-weight: 800;
         font-size: 3rem;
         margin-bottom: 0px;
-    }
+    }}
     
-    .subtitle-text {
-        color: #7f8c8d;
-        font-size: 1.1rem;
+    .subtitle-text {{
+        color: #4a5568 !important;
+        font-size: 1.15rem;
         margin-bottom: 25px;
-    }
+        font-weight: 500;
+    }}
 
     /* Glassmorphism Metric Cards */
-    .metric-container {
+    .metric-container {{
         display: flex;
         justify-content: space-between;
         gap: 15px;
         margin-bottom: 30px;
-    }
+    }}
     
-    .metric-card {
+    .metric-card {{
         flex: 1;
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.85);
         border-radius: 16px;
         padding: 20px;
-        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.6);
         text-align: center;
         transition: all 0.3s ease;
-    }
+    }}
     
-    .metric-card:hover {
+    .metric-card:hover {{
         transform: translateY(-5px);
-        box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.1);
-        border-color: rgba(255, 75, 75, 0.4);
-    }
+        box-shadow: 0 15px 35px rgba(255, 75, 75, 0.15);
+        border-color: rgba(255, 75, 75, 0.5);
+    }}
     
-    .metric-label {
+    .metric-label {{
         font-size: 0.9rem;
-        color: #888;
+        color: #475569;
         text-transform: uppercase;
         letter-spacing: 1px;
         margin-bottom: 8px;
-    }
+        font-weight: 600;
+    }}
     
-    .metric-value {
+    .metric-value {{
         font-size: 1.8rem;
-        font-weight: 700;
-        color: #FF4B4B;
-    }
+        font-weight: 800;
+        color: #E63946;
+    }}
 
     /* Tab customizations */
-    .stTabs [data-baseweb="tab-list"] {
+    .stTabs [data-baseweb="tab-list"] {{
         gap: 24px;
-    }
+        background-color: rgba(255, 255, 255, 0.5);
+        padding: 8px 16px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        backdrop-filter: blur(5px);
+    }}
 
-    .stTabs [data-baseweb="tab"] {
+    .stTabs [data-baseweb="tab"] {{
         height: 50px;
         white-space: pre-wrap;
         background-color: transparent;
-        border-radius: 4px;
-        color: #888;
+        border-radius: 8px;
+        color: #475569;
         font-weight: 600;
         font-size: 1.05rem;
-    }
+        transition: all 0.2s ease;
+    }}
 
-    .stTabs [aria-selected="true"] {
-        color: #FF4B4B !important;
-        border-bottom-color: #FF4B4B !important;
-    }
+    .stTabs [aria-selected="true"] {{
+        color: #E63946 !important;
+        border-bottom-color: #E63946 !important;
+        background-color: rgba(255, 255, 255, 0.4) !important;
+    }}
 </style>
 """, unsafe_allow_html=True)
 
