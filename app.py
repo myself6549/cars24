@@ -6,6 +6,7 @@ import plotly.graph_objects as go
 import requests
 from bs4 import BeautifulSoup
 import re
+import json
 import os
 import base64
 import time
@@ -479,38 +480,33 @@ with tab3:
 # ================= TAB 4: LIVE WEB SCRAPER =================
 with tab4:
 
-    st.subheader("⚡ Live Cars24 API Scraper")
+    st.subheader("⚡ Live Cars24 Scraper (Fixed)")
+
 
     city_mapping = {
-        "Delhi NCR": 2,
-        "Mumbai": 100,
-        "Bangalore": 470,
-        "Chennai": 570,
-        "Hyderabad": 360,
-        "Pune": 242,
-        "Kolkata": 132,
-        "Ahmedabad": 5
+        "Delhi NCR":2,
+        "Mumbai":100,
+        "Bangalore":470,
+        "Chennai":570,
+        "Hyderabad":360,
+        "Pune":242,
+        "Kolkata":132,
+        "Ahmedabad":5
     }
 
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        city = st.selectbox(
-            "Select City",
-            list(city_mapping.keys())
-        )
-
-    with col2:
-        pages = st.slider(
-            "Pages",
-            1,
-            5,
-            2
-        )
+    city = st.selectbox(
+        "Select City",
+        list(city_mapping.keys())
+    )
 
 
-    city_id = city_mapping[city]
+    pages = st.slider(
+        "Pages",
+        1,
+        5,
+        2
+    )
 
 
     if st.button("🚀 Start Scraper"):
@@ -518,16 +514,14 @@ with tab4:
 
         session = requests.Session()
 
+
         headers = {
 
-            "User-Agent":
-            "Mozilla/5.0",
+        "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 
-            "Accept":
-            "application/json",
-
-            "Content-Type":
-            "application/json"
+        "Accept":
+        "text/html,application/xhtml+xml"
 
         }
 
@@ -535,177 +529,202 @@ with tab4:
         session.headers.update(headers)
 
 
-        scraped=[]
-
-
-        progress = st.progress(0)
-
-        status = st.empty()
-
+        results=[]
 
 
         for page in range(1,pages+1):
 
-            status.text(
-                f"Fetching page {page}"
-            )
 
+            url=(
 
-            api_url = (
+            "https://www.cars24.com/buy-used-car/"
 
-            "https://www.cars24.com/api/buy/cars?"
-
-            f"sort=bestmatch"
+            f"?sort=bestmatch"
+            f"&storeCityId={city_mapping[city]}"
             f"&page={page}"
-            f"&storeCityId={city_id}"
 
             )
 
 
-            try:
+            st.write(
+            f"Fetching page {page}"
+            )
 
 
-                response=session.get(
-                    api_url,
-                    timeout=20
-                )
+            r=session.get(
+                url,
+                timeout=20
+            )
 
 
-                data=response.json()
-
-
-                cars=[]
-
-
-                if isinstance(data,dict):
-
-                    cars = (
-
-                    data.get("cars")
-                    or
-                    data.get("results")
-                    or
-                    data.get("data",{}).get("cars")
-                    or []
-
-                    )
-
-
-                for car in cars:
-
-
-                    name = (
-
-                    car.get("carName")
-                    or
-                    car.get("name")
-                    or
-                    "Unknown"
-
-                    )
-
-
-                    price=(
-
-                    car.get("price")
-                    or
-                    car.get("finalPrice")
-                    or
-                    "N/A"
-
-                    )
-
-
-                    kms=(
-
-                    car.get("kmsDriven")
-                    or
-                    car.get("kilometers")
-                    or
-                    "N/A"
-
-                    )
-
-
-                    fuel=(
-
-                    car.get("fuelType")
-                    or
-                    "N/A"
-
-                    )
-
-
-                    trans=(
-
-                    car.get("transmission")
-                    or
-                    "N/A"
-
-                    )
+            html=r.text
 
 
 
-                    scraped.append({
+            # Cloudflare check
 
-                    "Car Name":name,
-
-                    "Kilometers":kms,
-
-                    "Fuel":fuel,
-
-                    "Transmission":trans,
-
-                    "Registration":
-
-                    car.get(
-                    "registrationNumber",
-                    "N/A"
-                    ),
-
-                    "EMI":
-
-                    car.get(
-                    "emi",
-                    "N/A"
-                    ),
-
-
-                    "Final Price":price,
-
-
-                    "Location":city
-
-                    })
-
-
-
-                st.write(
-                f"Page {page}: {len(cars)} cars found"
-                )
-
-
-            except Exception as e:
-
+            if "cf-chl" in html.lower():
 
                 st.error(
-                f"API error: {e}"
+                "Cars24 blocked request (Cloudflare)"
                 )
 
+                break
 
-            progress.progress(
-            page/pages
+
+
+            soup=BeautifulSoup(
+                html,
+                "html.parser"
             )
 
 
-        if scraped:
+
+            # -------- NEXT DATA EXTRACTION --------
 
 
-            st.session_state.scraped_df = pd.DataFrame(scraped)
+            next_json=soup.find(
+                "script",
+                id="__NEXT_DATA__"
+            )
+
+
+            cars=[]
+
+
+            if next_json:
+
+
+                try:
+
+                    data=json.loads(
+                    next_json.string
+                    )
+
+
+                    text=json.dumps(data)
+
+
+                    matches=re.findall(
+                    r'"carName":"(.*?)"',
+                    text
+                    )
+
+
+                    prices=re.findall(
+                    r'"price":"(.*?)"',
+                    text
+                    )
+
+
+                    kms=re.findall(
+                    r'"kmsDriven":"?(.*?)"',
+                    text
+                    )
+
+
+
+                    for i,name in enumerate(matches):
+
+
+                        results.append({
+
+                        "Car Name":name,
+
+                        "Kilometers":
+                        kms[i] if i<len(kms)
+                        else "N/A",
+
+
+                        "Fuel":"N/A",
+
+                        "Transmission":"N/A",
+
+                        "Registration":"N/A",
+
+                        "EMI":"N/A",
+
+                        "Final Price":
+                        prices[i]
+                        if i<len(prices)
+                        else "N/A",
+
+
+                        "Location":city
+
+                        })
+
+
+
+                except Exception as e:
+
+                    st.write(
+                    "JSON parse failed",
+                    e
+                    )
+
+
+
+
+            # -------- HTML FALLBACK --------
+
+
+            if len(results)==0:
+
+
+                cards=soup.find_all(
+                ["h2","h3"]
+                )
+
+
+                for c in cards:
+
+
+                    txt=c.get_text(
+                    " ",
+                    strip=True
+                    )
+
+
+                    if re.search(
+                    r'20\d{2}',
+                    txt
+                    ):
+
+
+                        results.append({
+
+                        "Car Name":txt,
+
+                        "Kilometers":"N/A",
+
+                        "Fuel":"N/A",
+
+                        "Transmission":"N/A",
+
+                        "Registration":"N/A",
+
+                        "EMI":"N/A",
+
+                        "Final Price":"N/A",
+
+                        "Location":city
+
+                        })
+
+
+
+
+        if results:
+
+
+            st.session_state.scraped_df=pd.DataFrame(
+                results
+            )
 
 
             st.success(
-            f"{len(scraped)} listings scraped"
+            f"{len(results)} cars scraped"
             )
 
 
@@ -713,7 +732,7 @@ with tab4:
 
 
             st.error(
-            "Cars24 API returned no data"
+            "No listings extracted"
             )
 
 
@@ -723,64 +742,6 @@ with tab4:
 
 
         st.dataframe(
-            st.session_state.scraped_df,
-            use_container_width=True
+        st.session_state.scraped_df,
+        use_container_width=True
         )
-
-
-        if st.button(
-        "💾 Save to car_data.csv"
-        ):
-
-
-            new=st.session_state.scraped_df
-
-
-            if os.path.exists(DATA_FILE):
-
-                old=pd.read_csv(DATA_FILE)
-
-                final=pd.concat(
-                [old,new],
-                ignore_index=True
-                )
-
-
-                final.drop_duplicates(
-                subset=[
-                "Car Name",
-                "Final Price",
-                "Location"
-                ],
-                inplace=True
-                )
-
-
-                final.to_csv(
-                DATA_FILE,
-                index=False
-                )
-
-
-            else:
-
-
-                new.to_csv(
-                DATA_FILE,
-                index=False
-                )
-
-
-            load_data.clear()
-
-            reload_dataset()
-
-
-            del st.session_state.scraped_df
-
-
-            st.success(
-            "Dataset updated"
-            )
-
-            st.rerun()
