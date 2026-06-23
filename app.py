@@ -523,20 +523,24 @@ with tab4:
         with sync_playwright() as p:
 
 
-            browser=p.chromium.launch(
-                headless=True
-                args=[
-                     "--no-sandbox",
-                     "--disable-dev-shm-usage",
-                    "--disable-gpu"
-                ]
-            )
+           try:
 
+    browser=p.chromium.launch(
+        headless=True,
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu"
+        ]
+    )
 
-            page=browser.new_page(
-                user_agent=
-                "Mozilla/5.0 Chrome/120"
-            )
+except Exception as e:
+
+    st.error(
+        f"Browser launch failed: {e}"
+    )
+
+    st.stop()
 
 
             for pg in range(1,pages+1):
