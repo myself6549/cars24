@@ -478,8 +478,8 @@ with tab3:
 
 # ================= TAB 4: LIVE WEB SCRAPER =================
 with tab4:
-    st.subheader("⚡ Live Cars24 Web Scraper Tool")
-    st.write("Improved scraper: handles Cars24 dynamic HTML/embedded JSON changes and keeps the existing dashboard unchanged.")
+
+    st.subheader("⚡ Live Cars24 API Scraper")
 
     city_mapping = {
         "Delhi NCR": 2,
@@ -492,237 +492,295 @@ with tab4:
         "Ahmedabad": 5
     }
 
-    col_sc1, col_sc2 = st.columns(2)
 
-    with col_sc1:
-        selected_city_label = st.selectbox("Select Target City", list(city_mapping.keys()))
-        default_city = city_mapping[selected_city_label]
+    col1, col2 = st.columns(2)
 
-    with col_sc2:
-        pages_to_scrape = st.slider("Pages to scrape", 1, 5, 2)
-
-    with st.expander("⚙️ Advanced Scraping Options"):
-        target_city_id = st.number_input(
-            "Store City ID",
-            min_value=1,
-            max_value=1200,
-            value=default_city
+    with col1:
+        city = st.selectbox(
+            "Select City",
+            list(city_mapping.keys())
         )
 
-    def extract_json_objects(html):
-        """Extract possible Cars24 listing data from script JSON."""
-        found = []
-        scripts = BeautifulSoup(html, "html.parser").find_all("script")
-
-        for s in scripts:
-            txt = s.get_text(strip=True)
-            if "carName" in txt or "listing" in txt or "price" in txt:
-                matches = re.findall(r'\{.*?\}', txt)
-                for m in matches:
-                    if "carName" in m or "price" in m:
-                        found.append(m)
-
-        return found
-
-    def parse_card(card):
-        text = card.get_text(" ", strip=True)
-
-        year_match = re.search(r'\b20\d{2}\b', text)
-        km_match = re.search(r'([\d,]+)\s*km', text, re.I)
-        price_match = re.search(r'₹?\s*([\d.]+)\s*lakh', text, re.I)
-
-        fuel = "N/A"
-        for f in ["Petrol", "Diesel", "CNG", "Electric", "Hybrid"]:
-            if f.lower() in text.lower():
-                fuel = f
-                break
-
-        transmission = "N/A"
-        if "automatic" in text.lower():
-            transmission = "Automatic"
-        elif "manual" in text.lower():
-            transmission = "Manual"
-
-        name = None
-        for tag in card.find_all(["h2", "h3", "span", "p"]):
-            t = tag.get_text(" ", strip=True)
-            if year_match and year_match.group() in t:
-                name = t
-                break
-
-        if not name or not price_match:
-            return None
-
-        return {
-            "Car Name": name,
-            "Kilometers": km_match.group(1).replace(",", "") if km_match else "N/A",
-            "Fuel": fuel,
-            "Transmission": transmission,
-            "Registration": "N/A",
-            "EMI": "N/A",
-            "Final Price": price_match.group(0),
-            "Location": selected_city_label
-        }
+    with col2:
+        pages = st.slider(
+            "Pages",
+            1,
+            5,
+            2
+        )
 
 
-    start_sc = st.button("🚀 Start Web Scraper")
+    city_id = city_mapping[city]
 
-    if start_sc:
 
-        scraped_data = []
-        debug = []
+    if st.button("🚀 Start Scraper"):
+
 
         session = requests.Session()
 
         headers = {
+
             "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/124 Safari/537.36",
-            "Accept-Language": "en-IN,en;q=0.9"
+            "Mozilla/5.0",
+
+            "Accept":
+            "application/json",
+
+            "Content-Type":
+            "application/json"
+
         }
+
 
         session.headers.update(headers)
 
+
+        scraped=[]
+
+
         progress = st.progress(0)
+
         status = st.empty()
 
-        try:
-            session.get("https://www.cars24.com/", timeout=15)
-        except:
-            pass
 
 
-        for page in range(1, pages_to_scrape + 1):
+        for page in range(1,pages+1):
 
-            status.text(f"Scraping page {page}/{pages_to_scrape}")
-
-            url = (
-                "https://www.cars24.com/buy-used-car/"
-                f"?sort=bestmatch&storeCityId={target_city_id}&page={page}"
+            status.text(
+                f"Fetching page {page}"
             )
 
+
+            api_url = (
+
+            "https://www.cars24.com/api/buy/cars?"
+
+            f"sort=bestmatch"
+            f"&page={page}"
+            f"&storeCityId={city_id}"
+
+            )
+
+
             try:
-                r = session.get(url, timeout=20)
 
-                soup = BeautifulSoup(r.text, "html.parser")
 
-                cards = soup.find_all(
-                    class_=re.compile("Card|card|Wrapper|wrapper")
+                response=session.get(
+                    api_url,
+                    timeout=20
                 )
 
-                parsed = 0
 
-                for card in cards:
-
-                    item = parse_card(card)
-
-                    if item:
-                        scraped_data.append(item)
-                        parsed += 1
+                data=response.json()
 
 
-                # JSON fallback
-                if parsed == 0:
-
-                    for obj in extract_json_objects(r.text):
-
-                        year = re.search(r'20\d{2}', obj)
-                        price = re.search(r'[\d.]+\s*lakh', obj, re.I)
-
-                        if year and price:
-
-                            scraped_data.append({
-                                "Car Name": obj[:80],
-                                "Kilometers": "N/A",
-                                "Fuel": "N/A",
-                                "Transmission": "N/A",
-                                "Registration": "N/A",
-                                "EMI": "N/A",
-                                "Final Price": price.group(),
-                                "Location": selected_city_label
-                            })
-
-                            parsed += 1
+                cars=[]
 
 
-                debug.append(
-                    (page, len(cards), parsed)
+                if isinstance(data,dict):
+
+                    cars = (
+
+                    data.get("cars")
+                    or
+                    data.get("results")
+                    or
+                    data.get("data",{}).get("cars")
+                    or []
+
+                    )
+
+
+                for car in cars:
+
+
+                    name = (
+
+                    car.get("carName")
+                    or
+                    car.get("name")
+                    or
+                    "Unknown"
+
+                    )
+
+
+                    price=(
+
+                    car.get("price")
+                    or
+                    car.get("finalPrice")
+                    or
+                    "N/A"
+
+                    )
+
+
+                    kms=(
+
+                    car.get("kmsDriven")
+                    or
+                    car.get("kilometers")
+                    or
+                    "N/A"
+
+                    )
+
+
+                    fuel=(
+
+                    car.get("fuelType")
+                    or
+                    "N/A"
+
+                    )
+
+
+                    trans=(
+
+                    car.get("transmission")
+                    or
+                    "N/A"
+
+                    )
+
+
+
+                    scraped.append({
+
+                    "Car Name":name,
+
+                    "Kilometers":kms,
+
+                    "Fuel":fuel,
+
+                    "Transmission":trans,
+
+                    "Registration":
+
+                    car.get(
+                    "registrationNumber",
+                    "N/A"
+                    ),
+
+                    "EMI":
+
+                    car.get(
+                    "emi",
+                    "N/A"
+                    ),
+
+
+                    "Final Price":price,
+
+
+                    "Location":city
+
+                    })
+
+
+
+                st.write(
+                f"Page {page}: {len(cars)} cars found"
                 )
+
 
             except Exception as e:
 
-                debug.append(
-                    (page, 0, str(e))
+
+                st.error(
+                f"API error: {e}"
                 )
 
 
-            progress.progress(page / pages_to_scrape)
-            time.sleep(1)
+            progress.progress(
+            page/pages
+            )
 
 
-        with st.expander("🔍 Scraper Debug"):
-
-            for d in debug:
-                st.write(d)
+        if scraped:
 
 
-        if scraped_data:
+            st.session_state.scraped_df = pd.DataFrame(scraped)
 
-            st.session_state.scraped_df = pd.DataFrame(scraped_data)
 
             st.success(
-                f"Successfully scraped {len(scraped_data)} listings"
+            f"{len(scraped)} listings scraped"
             )
+
 
         else:
 
+
             st.error(
-                "No listings found. Cars24 layout/API may have changed."
+            "Cars24 API returned no data"
             )
 
 
+
+
     if "scraped_df" in st.session_state:
+
 
         st.dataframe(
             st.session_state.scraped_df,
             use_container_width=True
         )
 
-        if st.button("💾 Append Scraped Data"):
 
-            new_df = st.session_state.scraped_df
+        if st.button(
+        "💾 Save to car_data.csv"
+        ):
+
+
+            new=st.session_state.scraped_df
+
 
             if os.path.exists(DATA_FILE):
 
-                old = pd.read_csv(DATA_FILE)
+                old=pd.read_csv(DATA_FILE)
 
-                final = pd.concat(
-                    [old, new_df],
-                    ignore_index=True
+                final=pd.concat(
+                [old,new],
+                ignore_index=True
                 )
+
 
                 final.drop_duplicates(
-                    subset=[
-                        "Car Name",
-                        "Final Price",
-                        "Location"
-                    ],
-                    inplace=True
+                subset=[
+                "Car Name",
+                "Final Price",
+                "Location"
+                ],
+                inplace=True
                 )
 
-                final.to_csv(DATA_FILE, index=False)
+
+                final.to_csv(
+                DATA_FILE,
+                index=False
+                )
+
 
             else:
 
-                new_df.to_csv(
-                    DATA_FILE,
-                    index=False
+
+                new.to_csv(
+                DATA_FILE,
+                index=False
                 )
 
+
             load_data.clear()
+
             reload_dataset()
+
 
             del st.session_state.scraped_df
 
-            st.success("Dataset updated!")
+
+            st.success(
+            "Dataset updated"
+            )
+
             st.rerun()
