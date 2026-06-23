@@ -523,9 +523,9 @@ with tab4:
         with sync_playwright() as p:
 
 
-           try:
+          try:
 
-    browser=p.chromium.launch(
+    browser = p.chromium.launch(
         headless=True,
         args=[
             "--no-sandbox",
