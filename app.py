@@ -7,6 +7,7 @@ import requests
 from bs4 import BeautifulSoup
 import re
 import json
+from playwright.sync_api import sync_playwright
 import os
 import base64
 import time
@@ -481,7 +482,7 @@ with tab3:
 
 with tab4:
 
-    st.subheader("⚡ Cars24 Smart Scraper")
+    st.subheader("⚡ Cars24 Browser Scraper")
 
 
     city_mapping = {
@@ -510,247 +511,183 @@ with tab4:
     )
 
 
-
-    def recursive_search(obj, output):
-
-        if isinstance(obj, dict):
-
-            keys = obj.keys()
-
-            if (
-                "carName" in keys
-                or
-                "make" in keys
-                or
-                "model" in keys
-                or
-                "listingId" in keys
-            ):
-
-                output.append(obj)
+    if st.button("🚀 Start Scraper"):
 
 
-            for v in obj.values():
-                recursive_search(v,output)
+        scraped=[]
 
 
-        elif isinstance(obj,list):
-
-            for item in obj:
-                recursive_search(item,output)
+        progress=st.progress(0)
 
 
+        with sync_playwright() as p:
 
 
-    if st.button("🚀 Start Scraping"):
-
-
-        session=requests.Session()
-
-
-        session.headers.update({
-
-        "User-Agent":
-        "Mozilla/5.0 Chrome/120",
-
-        "Accept-Language":
-        "en-IN"
-
-        })
-
-
-        final=[]
-
-
-
-        for page in range(1,pages+1):
-
-
-            url=(
-
-            "https://www.cars24.com/buy-used-car/"
-
-            f"?sort=bestmatch"
-            f"&storeCityId={city_mapping[city]}"
-            f"&page={page}"
-
+            browser=p.chromium.launch(
+                headless=True
             )
 
 
-            st.write(
-            "Opening:",
-            page
+            page=browser.new_page(
+                user_agent=
+                "Mozilla/5.0 Chrome/120"
             )
 
 
-            r=session.get(
-                url,
-                timeout=30
-            )
+            for pg in range(1,pages+1):
 
 
+                url=(
 
-            # debug save
+                "https://www.cars24.com/buy-used-car/"
 
-            with open(
-            "cars24_debug.html",
-            "w",
-            encoding="utf-8"
-            ) as f:
-
-                f.write(r.text)
-
-
-
-            soup=BeautifulSoup(
-                r.text,
-                "html.parser"
-            )
-
-
-
-            objects=[]
-
-
-
-            for script in soup.find_all("script"):
-
-
-                txt=script.string
-
-
-                if txt:
-
-
-                    if (
-                    "carName" in txt
-                    or
-                    "listingId" in txt
-                    or
-                    "kms" in txt
-                    ):
-
-
-                        try:
-
-                            data=json.loads(txt)
-
-                            recursive_search(
-                            data,
-                            objects
-                            )
-
-
-                        except:
-
-                            pass
-
-
-
-
-            st.write(
-            "Objects found:",
-            len(objects)
-            )
-
-
-
-            for car in objects:
-
-
-                name=(
-
-                car.get("carName")
-                or
-                car.get("name")
-                or
-                (
-                str(car.get("make",""))
-                +" "
-                +str(car.get("model",""))
-                )
+                f"?sort=bestmatch"
+                f"&storeCityId={city_mapping[city]}"
+                f"&page={pg}"
 
                 )
 
 
-
-                if not name:
-                    continue
-
-
-
-                final.append({
-
-                "Car Name":name,
+                st.write(
+                "Loading page",
+                pg
+                )
 
 
-                "Kilometers":
-
-                car.get(
-                "kmsDriven",
-                car.get(
-                "kilometers",
-                "N/A"
-                )),
+                page.goto(
+                    url,
+                    wait_until="networkidle",
+                    timeout=60000
+                )
 
 
-                "Fuel":
-
-                car.get(
-                "fuelType",
-                "N/A"
-                ),
+                page.wait_for_timeout(
+                    5000
+                )
 
 
-                "Transmission":
-
-                car.get(
-                "transmission",
-                "N/A"
-                ),
-
-
-                "Registration":
-
-                car.get(
-                "registration",
-                "N/A"
-                ),
-
-
-                "EMI":
-
-                car.get(
-                "emi",
-                "N/A"
-                ),
-
-
-                "Final Price":
-
-                car.get(
-                "price",
-                "N/A"
-                ),
-
-
-                "Location":
-
-                city
-
-                })
+                cards=page.locator(
+                    "a"
+                ).all()
 
 
 
+                for c in cards:
 
-        if final:
+
+                    try:
+
+                        txt=c.inner_text()
 
 
-            st.session_state.scraped_df=pd.DataFrame(final)
+                        if (
+                        "₹" in txt
+                        and
+                        "km" in txt.lower()
+                        ):
+
+
+                            lines=txt.split("\n")
+
+
+                            scraped.append({
+
+                            "Car Name":
+                            lines[0],
+
+
+                            "Kilometers":
+
+                            next(
+                            (
+                            x for x in lines
+                            if "km" in x.lower()
+                            ),
+                            "N/A"
+                            ),
+
+
+                            "Fuel":
+
+                            next(
+                            (
+                            x for x in lines
+                            if x in
+                            [
+                            "Petrol",
+                            "Diesel",
+                            "CNG"
+                            ]
+                            ),
+                            "N/A"
+                            ),
+
+
+                            "Transmission":
+
+                            next(
+                            (
+                            x for x in lines
+                            if x in
+                            [
+                            "Manual",
+                            "Automatic"
+                            ]
+                            ),
+                            "N/A"
+                            ),
+
+
+                            "Registration":
+                            "N/A",
+
+
+                            "EMI":
+                            "N/A",
+
+
+                            "Final Price":
+
+                            next(
+                            (
+                            x for x in lines
+                            if "₹" in x
+                            ),
+                            "N/A"
+                            ),
+
+
+                            "Location":
+                            city
+
+                            })
+
+
+                    except:
+
+                        pass
+
+
+
+                progress.progress(
+                    pg/pages
+                )
+
+
+            browser.close()
+
+
+
+        if scraped:
+
+
+            st.session_state.scraped_df=pd.DataFrame(
+                scraped
+            )
 
 
             st.success(
-            f"{len(final)} cars extracted"
+            f"{len(scraped)} cars scraped"
             )
 
 
@@ -758,12 +695,8 @@ with tab4:
 
 
             st.error(
-            """
-            Cars24 did not expose listing data.
-            Check cars24_debug.html generated in the folder.
-            """
+            "No cars found. Cars24 changed UI."
             )
-
 
 
 
@@ -771,6 +704,6 @@ with tab4:
 
 
         st.dataframe(
-        st.session_state.scraped_df,
-        use_container_width=True
+            st.session_state.scraped_df,
+            use_container_width=True
         )
