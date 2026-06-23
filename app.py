@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 import re
 import os
 import base64
+import time
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -31,7 +32,7 @@ if bg_img_base64:
     bg_style_url = f"data:image/png;base64,{bg_img_base64}"
 else:
     # High-quality premium bright car background fallback
-    bg_style_url = "https://share.google/Zv8y3bKtPkE8TvmSB"
+    bg_style_url = "https://images.unsplash.com/photo-1494976388531-d1058494cdd8?auto=format&fit=crop&q=80&w=1920"
 
 # --- CUSTOM CSS FOR PREMIUM LOOK & FEEL ---
 st.markdown(f"""
@@ -508,115 +509,175 @@ with tab4:
     start_sc = st.button("🚀 Start Web Scraper")
     
     if start_sc:
-        # Containers to hold results
-        product_name = []
-        distances = []
-        emis = []
-        final_prices = []
-        locations = []
+        # Clear previous scraped data from session state
+        if "scraped_df" in st.session_state:
+            del st.session_state.scraped_df
+
+        scraped_data = []
+        page_debug = []   # stores (page_num, card_count, parsed_count) for debug
         
+        # Use a session so cookies (e.g. from the homepage warm-up) carry across requests.
+        # This mimics a real browser navigating the site and avoids basic bot-detection.
+        session = requests.Session()
         req_header = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36",
-            "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-            "Referer": "https://www.google.com/"
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept-Language": "en-IN,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
         }
+        session.headers.update(req_header)
         
         progress_bar = st.progress(0.0)
         status_text = st.empty()
+        
+        # Warm-up: visit the Cars24 homepage first to acquire session cookies
+        try:
+            status_text.text("Initialising session with Cars24...")
+            session.get("https://www.cars24.com/", timeout=10)
+            time.sleep(1.5)
+        except Exception:
+            pass  # warm-up failure is non-fatal
         
         for p in range(1, pages_to_scrape + 1):
             status_text.text(f"Scraping page {p} of {pages_to_scrape} from Cars24...")
             url = f"https://www.cars24.com/buy-used-car/?sort=bestmatch&serveWarrantyCount=true&listingSource=FilterTags&storeCityId={target_city_id}&page={p}"
             
             try:
-                response = requests.get(url, headers=req_header, timeout=10)
+                response = session.get(url, timeout=15)
+                # TEMP DEBUG: dump page 1 HTML so we can inspect what Streamlit receives
+                if p == 1:
+                    try:
+                        with open("streamlit_debug_page1.html", "w", encoding="utf-8") as _dbf:
+                            _dbf.write(response.text)
+                    except Exception:
+                        pass
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     
-                    # Parse products
-                    products = soup.find_all(class_='sc-ksBlki dxpZAa')
-                    for item in products:
-                        product_name.append(item.text)
+                    # Find all car card wrappers (stable class; regex fallback if suffix ever changes)
+                    cards = soup.find_all(class_='styles_normalCardWrapper__qDZjq')
+                    if not cards:
+                        cards = soup.find_all(class_=re.compile(r'normalCardWrapper'))
                     
-                    # Parse distances details
-                    dist_elements = soup.find_all(class_='sc-ksBlki knJTXq')
-                    for item in dist_elements:
-                        distances.append(item.text)
+                    page_parsed = 0
+                    for card in cards:
+                        # 1. Product Name — find via stable base class sc-ksBlki + year-prefixed text
+                        name_el = card.find(class_='sc-ksBlki dxpZAa')
+                        if not name_el:
+                            # Fallback: any sc-ksBlki span whose text starts with a 4-digit year
+                            for el in card.find_all('span', class_=re.compile(r'sc-ksBlki')):
+                                if re.match(r'^\d{4}\s', el.get_text(strip=True)):
+                                    name_el = el
+                                    break
+                        name = name_el.text.strip() if name_el else None
                         
-                    # Parse EMI
-                    emi_elements = soup.find_all(class_='styles_flexItem__2z__J')
-                    for item in emi_elements:
-                        emis.append(item.text)
+                        # 2. Final Price — sc-ksBlki p containing 'lakh'
+                        price_el = card.find(class_='sc-ksBlki dMXwkk')
+                        if not price_el:
+                            for el in card.find_all('p', class_=re.compile(r'sc-ksBlki')):
+                                t = el.get_text(strip=True)
+                                if 'lakh' in t.lower():
+                                    price_el = el
+                                    break
+                        price = price_el.text.strip() if price_el else None
                         
-                    # Parse Final Prices
-                    price_elements = soup.find_all(class_='sc-ksBlki dMXwkk')
-                    for item in price_elements:
-                        final_prices.append(item.text)
+                        # Only proceed if we have a name and price
+                        if not name or not price:
+                            continue
+                            
+                        # 3. Location
+                        loc_el = card.find(class_='styles_ellipsis__uatjG')
+                        loc = loc_el.get_text(strip=True) if loc_el else "N/A"
                         
-                    # Parse Location
-                    loc_elements = soup.find_all(class_='styles_ellipsis__uatjG')
-                    for item in loc_elements:
-                        locations.append(item.text)
+                        # 4. EMI — first flexItem div
+                        emi_el = card.find(class_='styles_flexItem__2z__J')
+                        emi = emi_el.get_text(strip=True) if emi_el else "N/A"
+                        
+                        # 5. Distance and Specs details (km, fuel, transmission, registration)
+                        spec_elements = card.find_all(class_='sc-ksBlki knJTXq')
+                        if not spec_elements:
+                            # Fallback: collect all p/span inside the specs list ul
+                            ul = card.find('ul')
+                            if ul:
+                                spec_elements = ul.find_all(['p', 'span'])
+                        spec_values = [el.get_text(strip=True) for el in spec_elements]
+                        
+                        km = transmission = fuel = registration = "N/A"
+                        for val in spec_values:
+                            if re.search(r'\d[\d,]+ km', val, re.IGNORECASE):
+                                km = re.sub(r'[^0-9]', '', val)
+                            elif val in ['Petrol', 'Diesel', 'CNG', 'Electric', 'Hybrid']:
+                                fuel = val
+                            elif val in ['Manual', 'Automatic', 'Auto']:
+                                transmission = 'Automatic' if val in ['Automatic', 'Auto'] else val
+                            elif re.search(r'^[A-Z]{2}-\d{1,2}', val):
+                                registration = val
+                                
+                        scraped_data.append({
+                            "Car Name": name,
+                            "Kilometers": km,
+                            "Fuel": fuel,
+                            "Transmission": transmission,
+                            "Registration": registration,
+                            "EMI": emi,
+                            "Final Price": price,
+                            "Location": loc
+                        })
+                        page_parsed += 1
+                    
+                    page_debug.append((p, len(cards), page_parsed))
                 else:
                     st.warning(f"⚠️ Page {p} could not be scraped. Status code: {response.status_code}")
+                    page_debug.append((p, 0, 0))
             except Exception as e:
                 st.error(f"Error requesting page {p}: {str(e)}")
+                page_debug.append((p, 0, 0))
             
             progress_bar.progress(p / pages_to_scrape)
+            if p < pages_to_scrape:
+                time.sleep(1.5)  # polite delay between pages
             
-        status_text.text("Scraping completed! Aligning and cleaning attributes...")
+        status_text.text("Scraping completed!")
         
-        # Align lists based on regex groupings from distance (standardizing attributes)
-        # Fuel tags, km strings, transmission type, state code
-        raw_kms = [re.sub(r'[^0-9]', '', x) for x in distances if re.search(r'km$', x)]
-        raw_fuels = [x for x in distances if re.fullmatch(r'Petrol|Diesel|CNG|Electric|Hybrid', x)]
-        raw_transmissions = [x for x in distances if re.fullmatch(r'Manual|Automatic', x)]
-        raw_registrations = [x for x in distances if re.fullmatch(r'[A-Z]{2}-\d{1,2}', x)]
+        # Debug info expander
+        with st.expander("🔍 Scrape debug info"):
+            for pg, n_cards, n_parsed in page_debug:
+                st.write(f"Page {pg}: {n_cards} card containers found → {n_parsed} listings parsed")
         
-        min_len = min(
-            len(product_name),
-            len(emis),
-            len(raw_kms),
-            len(raw_fuels),
-            len(raw_transmissions),
-            len(raw_registrations),
-            len(final_prices),
-            len(locations)
-        )
-        
-        if min_len > 0:
-            scraped_df = pd.DataFrame({
-                "Car Name": product_name[:min_len],
-                "Kilometers": raw_kms[:min_len],
-                "Fuel": raw_fuels[:min_len],
-                "Transmission": raw_transmissions[:min_len],
-                "Registration": raw_registrations[:min_len],
-                "EMI": emis[:min_len],
-                "Final Price": final_prices[:min_len],
-                "Location": locations[:min_len]
-            })
-            
-            st.success(f"🎉 Successfully scraped {len(scraped_df)} car listings!")
-            st.write("### Preview of Scraped Data")
-            st.dataframe(scraped_df, use_container_width=True)
-            
-            # Action button to save dataset
-            save_sc = st.button("💾 Append Scraped Data to local `car_data.csv`")
-            if save_sc:
-                if os.path.exists(DATA_FILE):
-                    existing_df = pd.read_csv(DATA_FILE)
-                    combined_df = pd.concat([existing_df, scraped_df], ignore_index=True)
-                    # Deduplicate based on name, location and price
-                    combined_df = combined_df.drop_duplicates(subset=["Car Name", "Final Price", "Location"], keep='last')
-                    combined_df.to_csv(DATA_FILE, index=False)
-                else:
-                    scraped_df.to_csv(DATA_FILE, index=False)
-                    
-                st.success("Dataset successfully updated! Reloading dynamic parameters...")
-                # Clear caching context and reload state data
-                load_data.clear()
-                reload_dataset()
-                st.rerun()
+        if scraped_data:
+            st.session_state.scraped_df = pd.DataFrame(scraped_data)
+            st.success(f"🎉 Successfully scraped {len(st.session_state.scraped_df)} car listings!")
         else:
-            st.error("No listings could be parsed. Stream block page was empty or class names from Cars24 have changed. Please verify connection and try again.")
+            st.error("No listings could be parsed. Cars24 may have blocked this request or updated their HTML. Check the debug info above for details.")
+
+    # Display preview and save button outside the scrape button block
+    if "scraped_df" in st.session_state:
+        st.write("### Preview of Scraped Data")
+        st.dataframe(st.session_state.scraped_df, use_container_width=True)
+        
+        # Action button to save dataset
+        save_sc = st.button("💾 Append Scraped Data to local `car_data.csv`")
+        if save_sc:
+            scraped_df = st.session_state.scraped_df
+            if os.path.exists(DATA_FILE):
+                existing_df = pd.read_csv(DATA_FILE)
+                combined_df = pd.concat([existing_df, scraped_df], ignore_index=True)
+                # Deduplicate based on name, location and price
+                combined_df = combined_df.drop_duplicates(subset=["Car Name", "Final Price", "Location"], keep='last')
+                combined_df.to_csv(DATA_FILE, index=False)
+            else:
+                scraped_df.to_csv(DATA_FILE, index=False)
+                
+            st.success("Dataset successfully updated! Reloading dynamic parameters...")
+            # Clear caching context and reload state data
+            load_data.clear()
+            reload_dataset()
+            # Clean state
+            del st.session_state.scraped_df
+            st.rerun()
